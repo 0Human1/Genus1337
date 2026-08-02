@@ -14,8 +14,8 @@
   --rave-b:#00FF41;
   --blog-bg:#F4F2EC;
   --blog-text:#111;
-  --fund-bg:#030D1A;
-  --fund-a:#4DFFB4;
+  --money-bg:#030D1A;
+  --money-a:#4DFFB4;
 }
 html,body{width:100%;height:100vh;background:var(--void);overflow:hidden;font-family:'JetBrains Mono',monospace;}
 
@@ -91,20 +91,20 @@ header{
 .blog-ghost:nth-child(2){animation-delay:-2.5s;}
 .blog-ghost:nth-child(3){animation-delay:-5s;}
 
-/* FUND */
-.portal--fund{background:var(--fund-bg);}
-.portal--fund .portal-name{color:rgba(168,196,212,0.88);}
-.portal--fund .portal-enter{color:var(--fund-a);border-color:rgba(77,255,180,0.18);}
-.portal--fund:hover .portal-enter{background:rgba(77,255,180,0.06);color:#fff;}
+/* MONEY */
+.portal--money{background:var(--money-bg);}
+.portal--money .portal-name{color:rgba(168,196,212,0.88);}
+.portal--money .portal-enter{color:var(--money-a);border-color:rgba(77,255,180,0.18);}
+.portal--money:hover .portal-enter{background:rgba(77,255,180,0.06);color:#fff;}
 
-.fund-data{
+.money-data{
   position:absolute;inset:0;padding:5rem 1.5rem 1.5rem;
   overflow:hidden;font-size:0.52rem;line-height:2;
   opacity:0.22;pointer-events:none;
 }
-.fund-row{display:flex;justify-content:space-between;gap:1rem;}
-.fund-row.up{color:var(--fund-a);}
-.fund-row.dn{color:#FF4D6D;}
+.money-row{display:flex;justify-content:space-between;gap:1rem;}
+.money-row.up{color:var(--money-a);}
+.money-row.dn{color:#FF4D6D;}
 </style>
 </head>
 <body>
@@ -139,13 +139,13 @@ header{
     </div>
   </div>
 
-  <div class="portal portal--fund">
-    <div class="fund-data" id="fund-data"></div>
+  <div class="portal portal--money">
+    <div class="money-data" id="money-data"></div>
     <div class="portal-content">
       <div class="portal-index">03 / ALPHA</div>
-      <div class="portal-name">FUND</div>
+      <div class="portal-name">MONEY</div>
       <div class="portal-desc">Systematic exploration.<br>Risk-adjusted thinking.</div>
-      <a class="portal-enter" href="/fund/">Access &rarr;</a>
+      <a class="portal-enter" href="/money/">Access &rarr;</a>
     </div>
   </div>
 
@@ -213,9 +213,9 @@ header{
   frame();
 })();
 
-// Fund ticker
+// Money ticker
 (function(){
-  var el=document.getElementById('fund-data');
+  var el=document.getElementById('money-data');
   var tickers=[
     ['BTC',67420],['ETH',3218],['SP500',5892],
     ['NVDA',1124],['QQQ',498.3],['GOLD',2341],
@@ -232,7 +232,7 @@ header{
       var chg=raw.toFixed(2);
       var cls=raw>=0?'up':'dn';
       var sign=raw>=0?'+':'';
-      html+='<div class="fund-row '+cls+'"><span>'+sym+'</span><span>'+price.toFixed(2)+'</span><span>'+sign+chg+'%</span></div>';
+      html+='<div class="money-row '+cls+'"><span>'+sym+'</span><span>'+price.toFixed(2)+'</span><span>'+sign+chg+'%</span></div>';
     }
     el.innerHTML=html;
   }
