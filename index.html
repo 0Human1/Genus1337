@@ -55,7 +55,11 @@ header{
 
 /* RAVE */
 .portal--rave{background:var(--rave-bg);}
-#rave-canvas{position:absolute;inset:0;width:100%;height:100%;}
+.portal-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  z-index:0;opacity:0.55;pointer-events:none;filter:saturate(1.15) contrast(1.05);}
+.portal--rave::after{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(ellipse at center,rgba(6,0,26,0.3) 0%,rgba(6,0,26,0.7) 100%);}
+#rave-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:2;}
 .portal--rave .portal-name{color:#fff;text-shadow:0 0 25px var(--rave-a),0 0 55px var(--rave-a);}
 .portal--rave .portal-enter{border-color:rgba(155,0,255,0.3);color:var(--rave-a);}
 .portal--rave:hover .portal-enter{background:rgba(155,0,255,0.1);color:#fff;}
@@ -116,6 +120,9 @@ header{
 <div class="portals">
 
   <div class="portal portal--rave">
+    <video class="portal-video" autoplay loop muted playsinline preload="auto">
+      <source src="music/bg.mp4" type="video/mp4">
+    </video>
     <canvas id="rave-canvas"></canvas>
     <div class="portal-content">
       <div class="portal-index">01 / ENVIRONMENT</div>

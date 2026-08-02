@@ -15,7 +15,17 @@
 }
 html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
   font-family:'JetBrains Mono',monospace;color:#fff;cursor:default;}
-#scene{position:fixed;inset:0;width:100%;height:100%;display:block;}
+/* ---- Background video (see-through layer behind the 3D scene) ---- */
+#bg-video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;
+  z-index:0;opacity:0.6;pointer-events:none;
+  filter:saturate(1.15) contrast(1.05);}
+/* dark violet tint + vignette so the neon palette still leads and edges stay moody */
+#bg-tint{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:
+    radial-gradient(ellipse at center,rgba(6,0,26,0.25) 0%,rgba(6,0,26,0.72) 100%),
+    linear-gradient(rgba(6,0,26,0.45),rgba(6,0,26,0.45));
+  mix-blend-mode:multiply;}
+#scene{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:2;}
 
 /* ---- HUD ---- */
 .hud{position:fixed;z-index:20;pointer-events:none;
@@ -41,6 +51,17 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
   border:1px solid rgba(155,0,255,0.3);padding:0.4rem 0.7rem;cursor:pointer;
   transition:all 0.2s;margin-left:0.4rem;}
 .ctl button:hover{color:#fff;background:rgba(155,0,255,0.12);border-color:var(--rave-a);}
+
+/* volume slider */
+.vol-wrap{pointer-events:auto;display:inline-flex;align-items:center;gap:0.5rem;
+  vertical-align:middle;margin-right:0.5rem;color:rgba(255,255,255,0.45);}
+#vol{pointer-events:auto;-webkit-appearance:none;appearance:none;width:74px;height:3px;
+  background:rgba(255,255,255,0.15);outline:none;cursor:pointer;border-radius:2px;
+  vertical-align:middle;}
+#vol::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:11px;height:11px;
+  border-radius:50%;background:var(--rave-a);box-shadow:0 0 8px var(--rave-a);cursor:pointer;}
+#vol::-moz-range-thumb{width:11px;height:11px;border:none;border-radius:50%;
+  background:var(--rave-a);box-shadow:0 0 8px var(--rave-a);cursor:pointer;}
 
 /* ---- Enter overlay ---- */
 #gate{position:fixed;inset:0;z-index:40;background:radial-gradient(ellipse at center,#0c0330 0%,#050010 70%,#000 100%);
@@ -71,6 +92,10 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
 </style>
 </head>
 <body>
+<video id="bg-video" autoplay loop muted playsinline preload="auto" poster="">
+  <source src="bg.mp4" type="video/mp4">
+</video>
+<div id="bg-tint"></div>
 <canvas id="scene"></canvas>
 
 <div class="hud tl">GENUS1337 // MUSIC</div>
@@ -80,6 +105,7 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
   LEVEL<div class="lvl"><i id="lvl"></i></div>
 </div>
 <div class="hud br ctl">
+  <span class="vol-wrap">VOL <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8"></span>
   <button id="mute">SOUND: ON</button>
   <a href="/">&larr; EXIT</a>
 </div>
@@ -124,36 +150,78 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
   // Renderer / scene / camera
   // =========================================================================
   var canvas=document.getElementById('scene');
-  var renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true,alpha:false});
+  var renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true,alpha:true});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   renderer.setSize(window.innerWidth,window.innerHeight);
+  renderer.setClearColor(0x000000,0); // transparent — the bg video shows through
 
   var scene=new THREE.Scene();
-  scene.background=new THREE.Color(0x06001A);
-  scene.fog=new THREE.FogExp2(0x06001A,0.028);
+  scene.background=null;               // no opaque backdrop, so video is visible
+  scene.fog=new THREE.FogExp2(0x06001A,0.022); // keep depth haze in the scene's own color
 
   var camera=new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,0.1,300);
   camera.position.set(0,4.5,26);
 
   // =========================================================================
-  // Floor grid (synthwave — scrolls toward the viewer)
+  // Curved-world bend — a view-space vertex shader that pulls distant / side
+  // geometry downward, so the flat grid reads like the horizon of a small
+  // sphere. Applied to every material we want to sit on that curved world.
+  // =========================================================================
+  var CURVE=0.0019; // bigger = tighter sphere (more curvature)
+  function applyCurve(mat){
+    mat.onBeforeCompile=function(shader){
+      shader.uniforms.uCurve={value:CURVE};
+      shader.vertexShader='uniform float uCurve;\n'+shader.vertexShader.replace(
+        '#include <project_vertex>',
+        [
+          'vec4 mvPosition = vec4( transformed, 1.0 );',
+          '#ifdef USE_INSTANCING',
+          '  mvPosition = instanceMatrix * mvPosition;',
+          '#endif',
+          'mvPosition = modelViewMatrix * mvPosition;',
+          'mvPosition.y -= uCurve * ( mvPosition.z * mvPosition.z + mvPosition.x * mvPosition.x );',
+          'gl_Position = projectionMatrix * mvPosition;'
+        ].join('\n')
+      );
+    };
+    return mat;
+  }
+
+  // =========================================================================
+  // Floor grid (synthwave — scrolls toward the viewer, curved by the shader)
   // =========================================================================
   var gridGroup=new THREE.Group();
   scene.add(gridGroup);
-  var GRID_SIZE=120, GRID_DIV=60, gridStep=GRID_SIZE/GRID_DIV;
-  function makeGrid(color){
-    var g=new THREE.GridHelper(GRID_SIZE,GRID_DIV,color,color);
-    g.material.transparent=true;g.material.opacity=0.22;
-    return g;
+  var GRID_SIZE=120, GRID_DIV=48;
+  // Build a grid whose lines are subdivided, so the shader bend curves them
+  // smoothly instead of snapping straight chords between distant endpoints.
+  function makeCurvedGrid(size,div,color,opacity){
+    var half=size/2, step=size/div, sub=5, N=div*sub, verts=[];
+    for(var xi=0;xi<=div;xi++){            // lines running along Z (constant x)
+      var x=-half+xi*step;
+      for(var s=0;s<N;s++){
+        verts.push(x,0,-half+(s/N)*size, x,0,-half+((s+1)/N)*size);
+      }
+    }
+    for(var zi=0;zi<=div;zi++){            // lines running along X (constant z)
+      var z=-half+zi*step;
+      for(var s2=0;s2<N;s2++){
+        verts.push(-half+(s2/N)*size,0,z, -half+((s2+1)/N)*size,0,z);
+      }
+    }
+    var geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+    var mat=applyCurve(new THREE.LineBasicMaterial({color:color,transparent:true,opacity:opacity}));
+    return new THREE.LineSegments(geo,mat);
   }
-  var gridA=makeGrid(VIOLET), gridB=makeGrid(VIOLET);
+  var gridA=makeCurvedGrid(GRID_SIZE,GRID_DIV,VIOLET,0.22);
+  var gridB=makeCurvedGrid(GRID_SIZE,GRID_DIV,VIOLET,0.22);
   gridB.position.z=-GRID_SIZE;
   gridGroup.add(gridA,gridB);
   gridGroup.position.y=0;
 
-  // faint reflective "ceiling" grid overhead (you're inside a space)
-  var ceil=new THREE.GridHelper(GRID_SIZE,GRID_DIV,GREEN,GREEN);
-  ceil.material.transparent=true;ceil.material.opacity=0.05;
+  // faint curved "ceiling" grid overhead (you're inside the sphere)
+  var ceil=makeCurvedGrid(GRID_SIZE,GRID_DIV,GREEN,0.05);
   ceil.position.y=26;
   scene.add(ceil);
 
@@ -169,26 +237,27 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
   for(var i=0;i<BARS;i++){
     var hue=i/BARS;
     var col=new THREE.Color().lerpColors(new THREE.Color(VIOLET),new THREE.Color(GREEN),hue);
-    var mat=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.9});
+    var mat=applyCurve(new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.9}));
     var m=new THREE.Mesh(barGeo,mat);
     m.position.x=(i-(BARS-1)/2)*1.05;
     m.position.y=0.5;
     barMeshes.push(m);
     stage.add(m);
     // mirror bar for a "reflection" below the floor line
-    var mm=new THREE.Mesh(barGeo,new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.15}));
+    var mm=new THREE.Mesh(barGeo,applyCurve(new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.15})));
     mm.position.x=m.position.x;mm.scale.y=-1;m.userData.mirror=mm;
     stage.add(mm);
   }
 
-  // central orb above the stage — big wireframe icosahedron that pulses
-  var orbGeo=new THREE.IcosahedronGeometry(4.2,1);
-  var orbMat=new THREE.MeshBasicMaterial({color:MAGENTA,wireframe:true,transparent:true,opacity:0.55});
+  // orb — wireframe icosahedron that pulses; sits behind + below the bars,
+  // low on the curved horizon, clear of the spectrum strip.
+  var orbGeo=new THREE.IcosahedronGeometry(3.4,1);
+  var orbMat=applyCurve(new THREE.MeshBasicMaterial({color:MAGENTA,wireframe:true,transparent:true,opacity:0.55}));
   var orb=new THREE.Mesh(orbGeo,orbMat);
-  orb.position.set(0,13,-4);
+  orb.position.set(0,11.5,-11);
   stage.add(orb);
-  var orbCore=new THREE.Mesh(new THREE.IcosahedronGeometry(2.2,0),
-    new THREE.MeshBasicMaterial({color:VIOLET,transparent:true,opacity:0.25}));
+  var orbCore=new THREE.Mesh(new THREE.IcosahedronGeometry(2.0,0),
+    applyCurve(new THREE.MeshBasicMaterial({color:VIOLET,transparent:true,opacity:0.25})));
   orbCore.position.copy(orb.position);
   stage.add(orbCore);
 
@@ -245,94 +314,30 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
   // =========================================================================
   // AUDIO — self-contained synthesized beat + analyser (no external files)
   // =========================================================================
-  var audioCtx=null, analyser=null, freqData=null, master=null;
-  var muted=false, bpm=128, beatDur=60/bpm, startTime=0, nextNote=0, step=0;
-  // simple bass note pattern (semitone offsets from a root)
-  var root=41.20; // E1
-  var bassPattern=[0,0,7,0,3,0,5,7];
+  var audioCtx=null, analyser=null, freqData=null, srcNode=null, gainNode=null;
+  var muted=false, vol=0.8; // start 20% below full volume
+  var video=document.getElementById('bg-video');
+  if(video) video.volume=vol;
 
+  // Route the video's ORIGINAL audio through a gain (volume) + analyser so the
+  // visuals react to the real soundtrack (the synthesized beat has been removed).
   function initAudio(){
     var AC=window.AudioContext||window.webkitAudioContext;
-    if(!AC) return false;
-    audioCtx=new AC();
-    master=audioCtx.createGain();
-    master.gain.value=0.9;
-    analyser=audioCtx.createAnalyser();
-    analyser.fftSize=128;
-    analyser.smoothingTimeConstant=0.72;
-    freqData=new Uint8Array(analyser.frequencyBinCount);
-    master.connect(analyser);
-    analyser.connect(audioCtx.destination);
-    startTime=audioCtx.currentTime+0.08;
-    nextNote=startTime;
-    step=0;
+    if(!AC || !video) return false;
+    try{
+      audioCtx=new AC();
+      analyser=audioCtx.createAnalyser();
+      analyser.fftSize=256;
+      analyser.smoothingTimeConstant=0.6;
+      freqData=new Uint8Array(analyser.frequencyBinCount);
+      gainNode=audioCtx.createGain();
+      gainNode.gain.value=vol;
+      srcNode=audioCtx.createMediaElementSource(video);
+      srcNode.connect(analyser);
+      analyser.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+    }catch(e){ return false; }
     return true;
-  }
-
-  function env(node,t,a,d,peak,sus){
-    node.gain.setValueAtTime(0.0001,t);
-    node.gain.exponentialRampToValueAtTime(peak,t+a);
-    node.gain.exponentialRampToValueAtTime(sus||0.0001,t+a+d);
-  }
-
-  function kick(t){
-    var o=audioCtx.createOscillator(), g=audioCtx.createGain();
-    o.type='sine';
-    o.frequency.setValueAtTime(140,t);
-    o.frequency.exponentialRampToValueAtTime(45,t+0.12);
-    g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(1.0,t+0.005);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.32);
-    o.connect(g);g.connect(master);o.start(t);o.stop(t+0.35);
-  }
-  function hat(t,open){
-    var bufSize=audioCtx.sampleRate*0.05;
-    var buf=audioCtx.createBuffer(1,bufSize,audioCtx.sampleRate);
-    var d=buf.getChannelData(0);
-    for(var i=0;i<bufSize;i++) d[i]=Math.random()*2-1;
-    var src=audioCtx.createBufferSource();src.buffer=buf;
-    var hp=audioCtx.createBiquadFilter();hp.type='highpass';hp.frequency.value=7000;
-    var g=audioCtx.createGain();
-    var dur=open?0.14:0.03;
-    g.gain.setValueAtTime(0.28,t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-    src.connect(hp);hp.connect(g);g.connect(master);src.start(t);src.stop(t+dur+0.02);
-  }
-  function bass(t,semi){
-    var freq=root*Math.pow(2,semi/12);
-    var o=audioCtx.createOscillator(), o2=audioCtx.createOscillator(), g=audioCtx.createGain();
-    var f=audioCtx.createBiquadFilter();f.type='lowpass';f.frequency.value=650;f.Q.value=6;
-    o.type='sawtooth';o2.type='square';o.frequency.value=freq;o2.frequency.value=freq*0.5;
-    env(g,t,0.01,beatDur*0.42,0.34);
-    o.connect(f);o2.connect(f);f.connect(g);g.connect(master);
-    o.start(t);o2.start(t);o.stop(t+beatDur*0.5);o2.stop(t+beatDur*0.5);
-  }
-  function stab(t,semi){
-    var freq=root*4*Math.pow(2,semi/12);
-    var o=audioCtx.createOscillator(), g=audioCtx.createGain();
-    o.type='sawtooth';o.frequency.value=freq;
-    var f=audioCtx.createBiquadFilter();f.type='lowpass';f.frequency.value=2600;f.Q.value=3;
-    env(g,t,0.006,0.18,0.12);
-    o.connect(f);f.connect(g);g.connect(master);o.start(t);o.stop(t+0.22);
-  }
-
-  // schedule 16th notes a little ahead of the clock
-  function scheduler(){
-    if(!audioCtx||muted) return;
-    var sixteenth=beatDur/4;
-    while(nextNote < audioCtx.currentTime+0.12){
-      var s=step%16;
-      if(s%4===0) kick(nextNote);              // 4-on-the-floor
-      if(s%2===0) hat(nextNote,false);          // closed hats on 8ths
-      if(s===6||s===14) hat(nextNote,true);     // open hat accents
-      // bassline on every 8th
-      if(s%2===0) bass(nextNote,bassPattern[(step/2|0)%bassPattern.length]);
-      // occasional stab chord on the "and" of beats
-      if(s===4||s===12) stab(nextNote,7);
-      if(s===10) stab(nextNote,5);
-      nextNote+=sixteenth;
-      step++;
-    }
   }
 
   // =========================================================================
@@ -366,6 +371,11 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
     if(initAudio()){
       if(audioCtx.state==='suspended') audioCtx.resume();
     }
+    if(video){
+      video.muted=false;   // the click is the user gesture browsers require for sound
+      try{video.currentTime=0;}catch(e){}
+      var pr=video.play(); if(pr&&pr.catch) pr.catch(function(){});
+    }
     gate.classList.add('gone');
   }
   gate.addEventListener('click',enter);
@@ -374,11 +384,25 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
   muteBtn.addEventListener('click',function(e){
     e.stopPropagation();
     muted=!muted;
-    if(master) master.gain.setTargetAtTime(muted?0:0.9,audioCtx.currentTime,0.02);
+    if(video) video.muted=muted;
     muteBtn.textContent='SOUND: '+(muted?'OFF':'ON');
   });
 
-  document.getElementById('bpm').textContent=bpm+' BPM';
+  // volume slider (0..1) — drives the WebAudio gain, with video.volume as fallback
+  var volSlider=document.getElementById('vol');
+  if(volSlider){
+    volSlider.value=vol;
+    volSlider.addEventListener('input',function(e){
+      e.stopPropagation();
+      vol=parseFloat(volSlider.value);
+      if(gainNode) gainNode.gain.setTargetAtTime(vol,audioCtx.currentTime,0.01);
+      if(video) video.volume=vol;
+      if(vol>0 && muted){ muted=false; if(video) video.muted=false; muteBtn.textContent='SOUND: ON'; }
+    });
+    volSlider.addEventListener('click',function(e){e.stopPropagation();});
+  }
+
+  document.getElementById('bpm').textContent='♪ ORIGINAL AUDIO';
   var lvlBar=document.getElementById('lvl');
 
   // =========================================================================
@@ -402,25 +426,25 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
     var t=clock.getElapsedTime();
     var dt=clock.getDelta();
 
-    scheduler();
-
     // --- read audio spectrum (or gently idle when silent) ---
-    var bassE=0, midE=0, level=0;
+    var bassE=0, midE=0, level=0, haveData=false;
     if(analyser && !muted){
       analyser.getByteFrequencyData(freqData);
       var n=freqData.length;
       for(var b=0;b<n;b++){
         var v=freqData[b]/255;
+        if(v>0.02) haveData=true;
         level+=v;
         if(b<n*0.18) bassE+=v;
         else if(b<n*0.6) midE+=v;
       }
       bassE/=(n*0.18); midE/=(n*0.42); level/=n;
-    } else {
-      // idle breathing so the scene never looks dead
-      bassE=0.35+0.25*Math.sin(t*2.2);
-      midE=0.3+0.2*Math.sin(t*1.3+1);
-      level=0.3+0.15*Math.sin(t*1.7);
+    }
+    if(!haveData){
+      // no live spectrum (muted, or analyser blocked) — animate so it's never dead
+      bassE=0.35+0.28*Math.sin(t*2.2)+0.12*Math.sin(t*5.3);
+      midE=0.3+0.22*Math.sin(t*1.3+1);
+      level=0.32+0.16*Math.sin(t*1.7);
     }
     smoothBass+=(bassE-smoothBass)*0.25;
     smoothMid+=(midE-smoothMid)*0.2;
@@ -436,28 +460,23 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
     gridA.material.opacity=0.14+smoothLevel*0.35;
     gridB.material.opacity=gridA.material.opacity;
 
-    // --- stage EQ bars ---
-    if(analyser && !muted){
-      for(var i=0;i<BARS;i++){
+    // --- stage EQ bars (react to live spectrum; animate when none) ---
+    for(var i=0;i<BARS;i++){
+      var m=barMeshes[i];
+      var target, amp;
+      if(haveData){
         var idx=Math.floor(i/BARS*freqData.length*0.85);
-        var amp=freqData[idx]/255;
-        var m=barMeshes[i];
-        var h=0.5+amp*amp*22;
-        m.scale.y+=(h-m.scale.y)*0.35;
-        m.position.y=m.scale.y*0.5;
-        m.material.opacity=0.5+amp*0.5;
-        var mir=m.userData.mirror;
-        mir.scale.y=-m.scale.y;mir.position.y=-m.scale.y*0.5;
+        amp=freqData[idx]/255;
+        target=0.5+Math.pow(amp,1.4)*7.5; // snappier, less squashed => tracks the beat
+      }else{
+        amp=Math.abs(Math.sin(t*3+i*0.45));
+        target=0.5+amp*(1.3+smoothLevel*3);
       }
-    } else {
-      for(var i2=0;i2<BARS;i2++){
-        var m2=barMeshes[i2];
-        var wob=0.5+Math.abs(Math.sin(t*2+i2*0.4))*(2.5+smoothLevel*6);
-        m2.scale.y+=(wob-m2.scale.y)*0.15;
-        m2.position.y=m2.scale.y*0.5;
-        m2.userData.mirror.scale.y=-m2.scale.y;
-        m2.userData.mirror.position.y=-m2.scale.y*0.5;
-      }
+      m.scale.y+=(target-m.scale.y)*(haveData?0.5:0.18); // faster follow when live
+      m.position.y=m.scale.y*0.5;
+      m.material.opacity=0.5+Math.min(0.5,amp*0.5);
+      var mir=m.userData.mirror;
+      mir.scale.y=-m.scale.y;mir.position.y=-m.scale.y*0.5;
     }
 
     // --- orb pulse & spin ---
@@ -499,7 +518,7 @@ html,body{width:100%;height:100%;background:var(--rave-bg);overflow:hidden;
     camera.position.x=targetX*8+Math.sin(t*0.7)*0.6;
     camera.position.y=4.5+Math.sin(t*1.9)*0.25*(1+smoothBass)-targetY*3;
     camera.position.z=26-beatPulse*0.6;
-    camera.lookAt(0,7+targetY*-4+smoothBass*1.5,-30);
+    camera.lookAt(0,15+targetY*-4+smoothBass*1.5,-30);
     camera.fov=70+beatPulse*2.5;
     camera.updateProjectionMatrix();
 
